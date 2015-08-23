@@ -1,0 +1,139 @@
+---
+title: "Practical Machine Learning Project"
+author: "Toan Vo"
+date: "August 18, 2015"
+output: html_document
+---
+
+# Synopsis
+
+The objective of this analysis is to apply machine learning algorithm to the Human Activity Recognition data set provided by PUC-RIO [link](http://groupware.les.inf.puc-rio.br/har) to predict the manner in which the six participants did the exercises.  They performed the exercises in **five** different ways as follows:  
+
+    A - exactly according to specification  
+    B - throwing the elbows to the front  
+    C - lifting the dumbell only half-way  
+    D - lowering the dumbell only half-way  
+    E - throw the hips to the front  
+    
+The Random Forest algorithm was implemented in this analysis after a thorough pre-processing to remove/impute missing values and unnecessary variables.
+    
+
+# Loading the Data and Libraries
+
+```{r, message = FALSE, warning = FALSE, echo=TRUE}
+
+library(caret)
+library(randomForest)
+
+setwd("C:/Coursera/Machine Learning")
+training_data <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""))
+test_data <- read.csv("pml-testing.csv", na.strings = c("NA", "#DIV/0!", ""))
+
+dim(training_data)
+
+```
+
+The training dataset has 19,622 records with 160 variables. The same test data set with 20 records is also loaded for pre-processing purpose.
+
+
+# Data Pre-Processing
+
+We need to check for the missing values across all 160 variable.
+
+```{r, echo=TRUE}
+
+table(sapply(training_data, function(x) {sum(is.na(x))}))
+
+```
+
+There are 100 variables have mostly missing values (ranging from 19,216 to 19,622 missing values).  The remaining 60 variables are useful for  our analysis and we can discard the rest of them.  We can further remove the near zero variance from the training data.
+
+```{r, echo=TRUE}
+# remove all the variables with mostly missing values
+
+missing_vars_idx <- apply(training_data, 2, function(x) {sum(is.na(x))})
+training_data <- training_data[, which(missing_vars_idx == 0)]
+
+missing_vars_idx <- apply(test_data, 2, function(x) {sum(is.na(x))})
+test_data <- test_data[, which(missing_vars_idx == 0)]
+
+dim(training_data)
+
+# Preprocess the variables
+
+v <- which(lapply(training_data, class) %in% "numeric")
+preObj <- preProcess(training_data[, v], method = c('knnImpute', 'center', 'scale'))
+train_new <- predict(preObj, training_data[, v])
+train_new$classe <- training_data$classe
+
+test_new <- predict(preObj, test_data[, v])
+test_new$classe <- test_data$classe
+
+# Remove near zero variables
+
+nzv <- nearZeroVar(train_new, saveMetrics = TRUE)
+train_new <- train_new[, nzv$nzv==FALSE]
+
+nzv <- nearZeroVar(test_new, saveMetrics = TRUE)
+test_new <- test_new[, nzv$nzv==FALSE]
+
+any(is.na(train_new))
+
+```
+
+
+# Create the training and cross validation sets
+
+The training data is now split into two sets: one set (60%) is used for the purpose of training and building the Random Forest model, and the other (40%) to be used for cross validating the model built.  The split was based on the outcome variable (*classe*) which has 5 values (A, B, C, D, E) the correspond to each exercise.
+
+```{r}
+
+set.seed(12345)
+
+train_idx <- createDataPartition(train_new$classe, p = 0.6, list = FALSE)
+training <- train_new[train_idx, ]
+validation <- train_new[-train_idx, ]
+
+```
+
+
+# Training the Model
+
+The model is built to predict the *classe* using Random Forest algorithm running in parallel mode.  Cross validation is used as train control method. Due to long waiting time for the model to run, it will be saved as an RBS file once it was completed.  We can then access this RBS file in the future rather than waiting for re-run every time.
+
+```{r, echo=TRUE}
+
+# rfmodel <- train(classe ~ ., method = "rf", data = training, trControl =  trainControl(method = 'cv'), number = 5, allowParallel = TRUE)
+# saveRDS(rfmodel, "rfmodel.RDS")
+
+rfmodel <- readRDS("rfmodel.RDS")
+rfmodel
+
+```
+
+# Evaluating the model
+
+The model is now used to make prediction on the validation set and then using confusionMatrix to test the results:
+
+```{r, echo=TRUE}
+
+pred <- predict(rfmodel, validation)
+confusionMatrix(validation$classe, pred)
+
+```
+
+The results indicate very high accuracy (99.1%) from the model with a very small number of mis-classifications.  Therefore, this model can be used to predict the unlabeled data set and expected to perform well because the data was collected from the same experiment.
+
+# Predicting the unlabeled data set
+
+Finally, we can now use this model to predict the 20 samples in the unlabeled data set with results as follows:
+
+```{r, echo=TRUE}
+
+test_pred <- predict(rfmodel, test_new)
+test_pred
+
+```
+
+This result set was submitted to the automatic grading system and returned all correct answers.
+
